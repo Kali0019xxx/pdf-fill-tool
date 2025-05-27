@@ -2,55 +2,146 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>PDF Fill & Sign Tool - CobbExtension</title>
+  <title>PDF Fill & Sign Tool</title>
   <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.0.0/dist/signature_pad.umd.min.js"></script>
   <style>
-    body { font-family: Arial; text-align: center; padding: 20px; }
-    input, button { margin: 10px; padding: 8px; }
+    body { font-family: Arial, padding: 20px; max-width: 800px; margin: auto; }
+    #signature-pad { border: 1px solid #ccc; width: 300px; height: 150px; }
+    .toolbar { margin: 20px 0; }
+    canvas { background: #fff; }
+    .draggable {
+      position: absolute;
+      cursor: move;
+      z-index: 10;
+    }
   </style>
 </head>
 <body>
-  <h1>Fill & Sign Your PDF (Free, No Login)</h1>
+  <h2>PDF Fill & Sign Tool (Free)</h2>
 
-  <input type="file" id="pdfUpload" accept="application/pdf" />
+  <div class="toolbar">
+    <input type="file" id="pdfUpload" accept="application/pdf" />
+    <button onclick="loadPDF()">Load PDF</button>
+    <br><br>
+    <label>Draw Signature:</label><br>
+    <canvas id="signature-pad"></canvas><br>
+    <button onclick="clearSignature()">Clear</button>
+    <button onclick="placeSignature()">Place Signature</button>
+  </div>
+
+  <div id="pdf-preview" style="border:1px solid #ccc; padding:10px; position: relative;"></div>
+
   <br>
-  <input type="text" id="name" placeholder="Enter your name/signature" />
-  <button onclick="fillAndDownload()">Fill & Download</button>
-
-  <p id="status"></p>
+  <button onclick="downloadSignedPDF()">Download Signed PDF</button>
 
   <script>
-    async function fillAndDownload() {
-      const fileInput = document.getElementById('pdfUpload');
-      const name = document.getElementById('name').value;
-      const status = document.getElementById('status');
-      
-      if (!fileInput.files.length || !name) {
-        status.textContent = "Please upload a PDF and enter a name.";
+    let pdfDoc, signatureImage, signaturePad, pageDims;
+
+    const canvas = document.getElementById("signature-pad");
+    signaturePad = new SignaturePad(canvas);
+
+    function clearSignature() {
+      signaturePad.clear();
+    }
+
+    async function loadPDF() {
+      const file = document.getElementById("pdfUpload").files[0];
+      if (!file) return alert("Please upload a PDF.");
+      const arrayBuffer = await file.arrayBuffer();
+      pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+      renderPreview();
+    }
+
+    async function renderPreview() {
+      const page = pdfDoc.getPages()[0];
+      const { width, height } = page.getSize();
+      pageDims = { width, height };
+
+      const preview = document.getElementById("pdf-preview");
+      preview.innerHTML = '';
+      preview.style.width = width / 2 + 'px';
+      preview.style.height = height / 2 + 'px';
+      preview.style.position = 'relative';
+      preview.style.background = '#f0f0f0';
+
+      const info = document.createElement('p');
+      info.textContent = "PDF loaded. You can place your signature.";
+      preview.appendChild(info);
+    }
+
+    function placeSignature() {
+      if (signaturePad.isEmpty()) {
+        alert("Please draw your signature.");
         return;
       }
 
-      const pdfBytes = await fileInput.files[0].arrayBuffer();
-      const pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
-      const pages = pdfDoc.getPages();
-      const firstPage = pages[0];
-      const { width, height } = firstPage.getSize();
+      const imgData = signaturePad.toDataURL();
+      const img = document.createElement("img");
+      img.src = imgData;
+      img.classList.add("draggable");
+      img.width = 100;
 
-      firstPage.drawText(name, {
-        x: 50,
-        y: height - 100,
-        size: 24,
-        color: PDFLib.rgb(0, 0, 0),
+      makeDraggable(img);
+      document.getElementById("pdf-preview").appendChild(img);
+    }
+
+    function makeDraggable(elm) {
+      let pos = { top: 0, left: 0, x: 0, y: 0 };
+
+      const mouseDownHandler = function (e) {
+        elm.style.zIndex = 1000;
+        pos = {
+          left: elm.offsetLeft,
+          top: elm.offsetTop,
+          x: e.clientX,
+          y: e.clientY,
+        };
+        document.addEventListener("mousemove", mouseMoveHandler);
+        document.addEventListener("mouseup", mouseUpHandler);
+      };
+
+      const mouseMoveHandler = function (e) {
+        const dx = e.clientX - pos.x;
+        const dy = e.clientY - pos.y;
+        elm.style.left = pos.left + dx + "px";
+        elm.style.top = pos.top + dy + "px";
+      };
+
+      const mouseUpHandler = function () {
+        document.removeEventListener("mousemove", mouseMoveHandler);
+        document.removeEventListener("mouseup", mouseUpHandler);
+      };
+
+      elm.addEventListener("mousedown", mouseDownHandler);
+    }
+
+    async function downloadSignedPDF() {
+      const preview = document.getElementById("pdf-preview");
+      const sigImg = preview.querySelector("img");
+      if (!sigImg) return alert("Please place a signature.");
+
+      const sigURL = sigImg.src;
+      const x = parseInt(sigImg.style.left || "0") * 2;
+      const y = parseInt(sigImg.style.top || "0") * 2;
+
+      const pngImageBytes = await fetch(sigURL).then(res => res.arrayBuffer());
+      const pngImage = await pdfDoc.embedPng(pngImageBytes);
+
+      const page = pdfDoc.getPages()[0];
+      page.drawImage(pngImage, {
+        x: x,
+        y: pageDims.height - y - 50,
+        width: 100,
+        height: 50,
       });
 
-      const newPdf = await pdfDoc.save();
-      const blob = new Blob([newPdf], { type: 'application/pdf' });
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = "filled.pdf";
+      link.download = "signed.pdf";
       link.click();
-
-      status.textContent = "PDF generated!";
     }
   </script>
 </body>
