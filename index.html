@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PDF Fill & Sign Tool - CobbExtension</title>
+  <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+  <style>
+    body { font-family: Arial; text-align: center; padding: 20px; }
+    input, button { margin: 10px; padding: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Fill & Sign Your PDF (Free, No Login)</h1>
+
+  <input type="file" id="pdfUpload" accept="application/pdf" />
+  <br>
+  <input type="text" id="name" placeholder="Enter your name/signature" />
+  <button onclick="fillAndDownload()">Fill & Download</button>
+
+  <p id="status"></p>
+
+  <script>
+    async function fillAndDownload() {
+      const fileInput = document.getElementById('pdfUpload');
+      const name = document.getElementById('name').value;
+      const status = document.getElementById('status');
+      
+      if (!fileInput.files.length || !name) {
+        status.textContent = "Please upload a PDF and enter a name.";
+        return;
+      }
+
+      const pdfBytes = await fileInput.files[0].arrayBuffer();
+      const pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
+      const pages = pdfDoc.getPages();
+      const firstPage = pages[0];
+      const { width, height } = firstPage.getSize();
+
+      firstPage.drawText(name, {
+        x: 50,
+        y: height - 100,
+        size: 24,
+        color: PDFLib.rgb(0, 0, 0),
+      });
+
+      const newPdf = await pdfDoc.save();
+      const blob = new Blob([newPdf], { type: 'application/pdf' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = "filled.pdf";
+      link.click();
+
+      status.textContent = "PDF generated!";
+    }
+  </script>
+</body>
+</html>
